@@ -2,10 +2,8 @@ name: Random Domain Visit
 
 on:
   schedule:
-    # UTC时间，需根据你的时区调整
-    # 中国时区(UTC+8): 中午12点 = UTC 04:00, 晚上12点 = UTC 16:00
-    - cron: '58 3 * * *'   # 中午12点前2分钟 (UTC)
-    - cron: '58 15 * * *'  # 晚上12点前2分钟 (UTC)
+    - cron: '58 3 * * *'   # 中午12点前2分钟 (UTC+8)
+    - cron: '58 15 * * *'  # 晚上12点前2分钟 (UTC+8)
   workflow_dispatch:
 
 jobs:
@@ -27,8 +25,6 @@ jobs:
             "sakura.cloud-ip.cc"
             "ycenzh.abrdns.com"
             "ycenzh.ddns-ip.net"
-            "ycenzh.github.io"
-            "fuwari.oh1.top"
           )
           
           # 浏览器 User-Agent 列表
@@ -42,7 +38,7 @@ jobs:
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
           )
           
-          # 随机延迟 0-240 秒（前后2分钟内随机）
+          # 随机延迟 0-240 秒
           delay=$((RANDOM % 241))
           echo "⏰ 随机延迟 ${delay} 秒后开始访问..."
           sleep ${delay}
@@ -55,6 +51,9 @@ jobs:
           # 打乱域名数组
           shuffled_domains=($(printf '%s\n' "${domains[@]}" | shuf))
           
+          success_count=0
+          fail_count=0
+          
           # 访问选中的域名
           for i in $(seq 1 ${visit_count}); do
             domain=${shuffled_domains[$((i-1))]}
@@ -62,52 +61,117 @@ jobs:
             # 随机选择一个 User-Agent
             ua=${user_agents[$RANDOM % ${#user_agents[@]}]}
             
-            # 随机选择协议 (http/https)
-            if [ $((RANDOM % 10)) -lt 8 ]; then
-              protocol="https"
-            else
-              protocol="http"
-            fi
-            url="${protocol}://${domain}"
-            
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo "🌐 访问域名 #${i}: ${url}"
+            echo "🌐 访问域名 #${i}: ${domain}"
             echo "🔧 User-Agent: ${ua:0:50}..."
+            echo ""
             
-            # 模拟真实浏览器访问
-            response=$(curl -s -L -w "\n%{http_code}|%{time_total}|%{time_namelookup}" \
+            # 先进行 DNS 检查
+            echo "🔍 DNS检查..."
+            if host ${domain} > /dev/null 2>&1; then
+              dns_result=$(host ${domain} | head -n 1)
+              echo "✅ DNS解析成功: ${dns_result}"
+            else
+              echo "❌ DNS解析失败"
+              ((fail_count++))
+              continue
+            fi
+            
+            # 尝试 HTTPS
+            echo ""
+            echo "🔐 尝试 HTTPS 访问..."
+            
+            https_output=$(mktemp)
+            https_error=$(mktemp)
+            
+            curl -s -L -w "\n---STATS---\nhttp_code=%{http_code}\ntime_total=%{time_total}\ntime_namelookup=%{time_namelookup}\ntime_connect=%{time_connect}\ntime_appconnect=%{time_appconnect}\nsize_download=%{size_download}" \
               -H "User-Agent: ${ua}" \
-              -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8" \
-              -H "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7" \
+              -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8" \
+              -H "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8" \
               -H "Accept-Encoding: gzip, deflate, br" \
               -H "DNT: 1" \
               -H "Connection: keep-alive" \
               -H "Upgrade-Insecure-Requests: 1" \
-              -H "Sec-Fetch-Dest: document" \
-              -H "Sec-Fetch-Mode: navigate" \
-              -H "Sec-Fetch-Site: none" \
-              -H "Sec-Fetch-User: ?1" \
               -H "Cache-Control: max-age=0" \
-              -H "Referer: https://www.google.com/" \
               --compressed \
-              --connect-timeout 15 \
-              --max-time 30 \
-              "${url}" 2>&1) || true
+              --connect-timeout 10 \
+              --max-time 20 \
+              -o /dev/null \
+              "https://${domain}" > ${https_output} 2>${https_error}
             
-            # 解析响应
-            stats=$(echo "$response" | tail -n 1)
-            http_code=$(echo "$stats" | cut -d'|' -f1)
-            time_total=$(echo "$stats" | cut -d'|' -f2)
-            time_dns=$(echo "$stats" | cut -d'|' -f3)
+            https_exit_code=$?
             
-            if [[ "$http_code" =~ ^[0-9]+$ ]]; then
-              echo "✅ HTTP状态码: ${http_code}"
-              echo "⏱️  总耗时: ${time_total}s | DNS解析: ${time_dns}s"
+            # 解析结果
+            if [ -s ${https_output} ]; then
+              http_code=$(grep "http_code=" ${https_output} | cut -d'=' -f2)
+              time_total=$(grep "time_total=" ${https_output} | cut -d'=' -f2)
+              time_dns=$(grep "time_namelookup=" ${https_output} | cut -d'=' -f2)
+              time_connect=$(grep "time_connect=" ${https_output} | cut -d'=' -f2)
+              time_ssl=$(grep "time_appconnect=" ${https_output} | cut -d'=' -f2)
+              size_download=$(grep "size_download=" ${https_output} | cut -d'=' -f2)
             else
-              echo "❌ 访问失败"
+              http_code="000"
             fi
             
-            # 如果还有下一个域名，随机等待 3-10 秒
+            # 判断访问结果
+            if [ ${https_exit_code} -eq 0 ] && [[ "${http_code}" =~ ^[2-3][0-9]{2}$ ]]; then
+              echo "✅ HTTPS访问成功！"
+              echo "   └─ HTTP状态码: ${http_code}"
+              echo "   └─ 总耗时: ${time_total}s"
+              echo "   └─ DNS解析: ${time_dns}s | TCP连接: ${time_connect}s | SSL握手: ${time_ssl}s"
+              echo "   └─ 下载大小: ${size_download} bytes"
+              ((success_count++))
+            else
+              echo "⚠️  HTTPS访问失败 (退出代码: ${https_exit_code}, HTTP: ${http_code})"
+              
+              # 显示详细错误信息
+              if [ -s ${https_error} ]; then
+                echo "   └─ 错误信息: $(cat ${https_error} | head -n 3 | tr '\n' ' ')"
+              fi
+              
+              # 尝试 HTTP
+              echo ""
+              echo "🔓 回退到 HTTP 访问..."
+              
+              http_output=$(mktemp)
+              http_error=$(mktemp)
+              
+              curl -s -L -w "\n---STATS---\nhttp_code=%{http_code}\ntime_total=%{time_total}" \
+                -H "User-Agent: ${ua}" \
+                -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+                --connect-timeout 10 \
+                --max-time 20 \
+                -o /dev/null \
+                "http://${domain}" > ${http_output} 2>${http_error}
+              
+              http_exit_code=$?
+              
+              if [ -s ${http_output} ]; then
+                http_code=$(grep "http_code=" ${http_output} | cut -d'=' -f2)
+                time_total=$(grep "time_total=" ${http_output} | cut -d'=' -f2)
+              else
+                http_code="000"
+              fi
+              
+              if [ ${http_exit_code} -eq 0 ] && [[ "${http_code}" =~ ^[2-3][0-9]{2}$ ]]; then
+                echo "✅ HTTP访问成功！"
+                echo "   └─ HTTP状态码: ${http_code}"
+                echo "   └─ 总耗时: ${time_total}s"
+                ((success_count++))
+              else
+                echo "❌ HTTP访问也失败 (退出代码: ${http_exit_code}, HTTP: ${http_code})"
+                if [ -s ${http_error} ]; then
+                  echo "   └─ 错误信息: $(cat ${http_error} | head -n 3 | tr '\n' ' ')"
+                fi
+                ((fail_count++))
+              fi
+              
+              rm -f ${http_output} ${http_error}
+            fi
+            
+            rm -f ${https_output} ${https_error}
+            
+            # 如果还有下一个域名，随机等待
             if [ ${i} -lt ${visit_count} ]; then
               interval=$((RANDOM % 8 + 3))
               echo ""
@@ -119,5 +183,6 @@ jobs:
           
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "✨ 所有访问任务完成！"
+          echo "📊 统计: 成功 ${success_count} | 失败 ${fail_count}"
           echo "📅 完成时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')"
         shell: bash
