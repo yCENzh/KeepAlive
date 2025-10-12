@@ -1,0 +1,123 @@
+name: Random Domain Visit
+
+on:
+  schedule:
+    # UTC时间，需根据你的时区调整
+    # 中国时区(UTC+8): 中午12点 = UTC 04:00, 晚上12点 = UTC 16:00
+    - cron: '58 3 * * *'   # 中午12点前2分钟 (UTC)
+    - cron: '58 15 * * *'  # 晚上12点前2分钟 (UTC)
+  workflow_dispatch:
+
+jobs:
+  visit-domains:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Random Domain Visit
+        run: |
+          #!/bin/bash
+          set -e
+          
+          # 域名列表
+          domains=(
+            "ycenzh.ip-ddns.com"
+            "cname.abrdns.com"
+            "first.abrdns.com"
+            "github.abrdns.com"
+            "sakura.cloud-ip.cc"
+            "ycenzh.abrdns.com"
+            "ycenzh.ddns-ip.net"
+            "ycenzh.github.io"
+            "fuwari.oh1.top"
+          )
+          
+          # 浏览器 User-Agent 列表
+          user_agents=(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36 Edg/119.0.0.0"
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0"
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15"
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1"
+          )
+          
+          # 随机延迟 0-240 秒（前后2分钟内随机）
+          delay=$((RANDOM % 241))
+          echo "⏰ 随机延迟 ${delay} 秒后开始访问..."
+          sleep ${delay}
+          
+          # 随机选择访问 1 或 2 个域名
+          visit_count=$((RANDOM % 2 + 1))
+          echo "🎯 本次将访问 ${visit_count} 个域名"
+          echo ""
+          
+          # 打乱域名数组
+          shuffled_domains=($(printf '%s\n' "${domains[@]}" | shuf))
+          
+          # 访问选中的域名
+          for i in $(seq 1 ${visit_count}); do
+            domain=${shuffled_domains[$((i-1))]}
+            
+            # 随机选择一个 User-Agent
+            ua=${user_agents[$RANDOM % ${#user_agents[@]}]}
+            
+            # 随机选择协议 (http/https)
+            if [ $((RANDOM % 10)) -lt 8 ]; then
+              protocol="https"
+            else
+              protocol="http"
+            fi
+            url="${protocol}://${domain}"
+            
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🌐 访问域名 #${i}: ${url}"
+            echo "🔧 User-Agent: ${ua:0:50}..."
+            
+            # 模拟真实浏览器访问
+            response=$(curl -s -L -w "\n%{http_code}|%{time_total}|%{time_namelookup}" \
+              -H "User-Agent: ${ua}" \
+              -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8" \
+              -H "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8,en-US;q=0.7" \
+              -H "Accept-Encoding: gzip, deflate, br" \
+              -H "DNT: 1" \
+              -H "Connection: keep-alive" \
+              -H "Upgrade-Insecure-Requests: 1" \
+              -H "Sec-Fetch-Dest: document" \
+              -H "Sec-Fetch-Mode: navigate" \
+              -H "Sec-Fetch-Site: none" \
+              -H "Sec-Fetch-User: ?1" \
+              -H "Cache-Control: max-age=0" \
+              -H "Referer: https://www.google.com/" \
+              --compressed \
+              --connect-timeout 15 \
+              --max-time 30 \
+              "${url}" 2>&1) || true
+            
+            # 解析响应
+            stats=$(echo "$response" | tail -n 1)
+            http_code=$(echo "$stats" | cut -d'|' -f1)
+            time_total=$(echo "$stats" | cut -d'|' -f2)
+            time_dns=$(echo "$stats" | cut -d'|' -f3)
+            
+            if [[ "$http_code" =~ ^[0-9]+$ ]]; then
+              echo "✅ HTTP状态码: ${http_code}"
+              echo "⏱️  总耗时: ${time_total}s | DNS解析: ${time_dns}s"
+            else
+              echo "❌ 访问失败"
+            fi
+            
+            # 如果还有下一个域名，随机等待 3-10 秒
+            if [ ${i} -lt ${visit_count} ]; then
+              interval=$((RANDOM % 8 + 3))
+              echo ""
+              echo "⏳ 等待 ${interval} 秒后访问下一个域名..."
+              sleep ${interval}
+              echo ""
+            fi
+          done
+          
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "✨ 所有访问任务完成！"
+          echo "📅 完成时间: $(TZ=Asia/Shanghai date '+%Y-%m-%d %H:%M:%S %Z')"
+        shell: bash
