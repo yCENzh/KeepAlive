@@ -1,9 +1,9 @@
 name: Random Domain Visit
 
 on:
-  schedule:
-    - cron: '58 3 * * *'   # 中午12点前2分钟 (UTC+8)
-    - cron: '58 15 * * *'  # 晚上12点前2分钟 (UTC+8)
+#  schedule:
+#    - cron: '58 3 * * *'   # 中午12点前2分钟 (UTC+8)
+#    - cron: '58 15 * * *'  # 晚上12点前2分钟 (UTC+8)
   workflow_dispatch:
 
 jobs:
